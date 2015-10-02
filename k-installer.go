@@ -29,7 +29,7 @@ type project struct {
 	projectname, hostname, pwd, port, typ projectField
 }
 
-var postUpdateContent string
+var postUpdateContent string // <------------ DEBUG FLAG
 
 func main() {
 
@@ -47,34 +47,7 @@ func main() {
 		},
 	}
 
-	// Now we need to know which instalation we going to make.
-	// And once we get to know it, let's load the setup with
-	// the aproppriate set of files and commands.
-	if project.typ.name == "Yii" {
-
-		// Loading common steps into the selected setup
-		project.typ.program.setup = []string{}
-		project.typ.program.postUpdateFilename = "post-update-yii"
-
-	} else {
-
-		// Loading common steps into the selected setup
-		project.typ.program.setup = []string{
-			"echo -e '[User]\nname = Pipi, server girl' > .gitconfig",
-			"cd ~/www/www/ && git init",
-			"cd ~/www/www/ && touch readme.txt && git add . ",
-			"cd ~/www/www/ && git commit -m 'on the beginning was the commit'",
-			"cd ~/private/ && mkdir repos && cd repos && mkdir " + project.projectname.name + "_hub.git && cd " + project.projectname.name + "_hub.git && git --bare init",
-			"cd ~/www/www && git remote add hub ~/private/repos/" + project.projectname.name + "_hub.git && git push hub master",
-			"post-update configuration",
-			"cd ~/www/www && git remote add hub ~/private/repos/" + project.projectname.name + "_hub.git/hooks && chmod 755 post-update",
-			project.projectname.name + ".dev",
-			"git clone",
-		}
-		project.typ.program.postUpdateFilename = "post-update-wp"
-	}
 	project.connect(config)
-
 	fmt.Println("Environment configuration done.")
 }
 
@@ -84,46 +57,46 @@ func (p *project) assemblyLine() {
 	p.projectname.label = "projectname"
 	p.projectname.errorMsg = "error getting the project's name: "
 	p.projectname.validationMsg = "make sure you type a valid name for your project (3 to 20 characters)."
-	ask4Input(&p.projectname)
+	p.projectname.name = checkInput(ask4Input(&p.projectname))
 
 	// Hostname
 	p.hostname.inputQuestion = "hostname: "
 	p.hostname.label = "hostname"
 	p.hostname.errorMsg = "error getting the project's hostname: "
 	p.hostname.validationMsg = "make sure you type a valid hostname for your project. it must contain '.com', '.pt' or '.org', for example.)."
-	ask4Input(&p.hostname)
+	p.hostname.name = checkInput(ask4Input(&p.hostname))
 
 	// Password
 	p.pwd.inputQuestion = "password: "
 	p.pwd.label = "pwd"
 	p.pwd.errorMsg = "error getting the project's password: "
 	p.pwd.validationMsg = "type a valid password. It must contain at least 6 digits"
-	ask4Input(&p.pwd)
+	p.pwd.name = checkInput(ask4Input(&p.pwd))
 
 	// Port
 	p.port.inputQuestion = "port (default 22): "
 	p.port.label = "port"
 	p.port.errorMsg = "error getting the project's port"
-	p.port.validationMsg = "only digits allowed. min 0, max 999."
-	ask4Input(&p.port)
+	p.port.validationMsg = "only digits allowed. min 0, max 9999."
+	p.port.name = checkInput(ask4Input(&p.port))
 
 	// Type
 	p.typ.inputQuestion = "[1] Yii\n[2] WP or goHugo\nEnter project type: "
 	p.typ.label = "type"
 	p.typ.errorMsg = "error getting the project's type"
 	p.typ.validationMsg = "pay attention to the options"
-	ask4Input(&p.typ)
+	p.typ.name = checkInput(ask4Input(&p.typ))
 }
 
 // Takes the assemblyLine's data and mount the prompt for the user.
-func ask4Input(field *projectField) {
+func ask4Input(field *projectField) (*projectField, string) {
 
 	fmt.Print(field.inputQuestion)
 
 	var input string
 	_, err := fmt.Scanln(&input)
 
-	// The port admits empty string as user input. Setting the default value of "22".
+	// The port admits empty string as user input. Setting the default value to "22".
 	if err != nil && err.Error() == "unexpected newline" && field.label != "port" {
 		ask4Input(field)
 	} else if err != nil && err.Error() == "unexpected newline" {
@@ -133,12 +106,11 @@ func ask4Input(field *projectField) {
 		log.Fatal(field.errorMsg, err)
 	}
 
-	// After we've got the input we must check if it's valid.
-	checkInput(field, input)
+	return field, input
 }
 
 // Check invalid parameters on the user input.
-func checkInput(field *projectField, input string) {
+func checkInput(field *projectField, input string) string {
 
 	switch inputLength := len(input); field.label {
 	case "projectname":
@@ -159,7 +131,7 @@ func checkInput(field *projectField, input string) {
 	case "port":
 		if inputLength == 0 {
 			input = "22"
-		} else if inputLength > 3 {
+		} else if inputLength > 4 {
 			fmt.Println(field.validationMsg)
 			ask4Input(field)
 		}
@@ -173,7 +145,9 @@ func checkInput(field *projectField, input string) {
 			input = "WP"
 		}
 	}
-	field.name = input
+
+	// Everything looks fine so lets set the value.
+	return input
 }
 
 // Creates a ssh connection between the local machine and the remote server.
@@ -299,6 +273,5 @@ func (p *project) secureCopy(conn *ssh.Client) {
 func getUserHomeDir() string {
 	usr, err := user.Current()
 	errorUtil.CheckError("Failed to locate user home directory ", err)
-
 	return usr.HomeDir
 }
