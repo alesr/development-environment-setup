@@ -25,7 +25,7 @@ type projectField struct {
 }
 
 type project struct {
-	projectname, hostname, pwd, port, typ projectField
+	projectname, hostname, pwd, port, typ, sshkey projectField
 }
 
 func main() {
@@ -37,6 +37,7 @@ func main() {
 	project.assemblyLine()
 
 	project.connect()
+
 	fmt.Println("Environment configuration done.")
 }
 
@@ -75,6 +76,12 @@ func (p *project) assemblyLine() {
 	p.typ.errorMsg = "error getting the project's type"
 	p.typ.validationMsg = "pay attention to the options"
 	p.typ.name = checkInput(ask4Input(&p.typ))
+
+	p.sshkey.inputQuestion = "Public ssh key name: "
+	p.sshkey.label = "sshkey"
+	p.sshkey.errorMsg = "error getting the key name"
+	p.sshkey.validationMsg = "pay attention to the options"
+	p.sshkey.name = checkInput(ask4Input(&p.sshkey))
 
 	// Now we need to know which instalation we going to make.
 	// And once we get to know it, let's load the setup with
@@ -192,7 +199,8 @@ func (p *project) connect() {
 
 		switch p.typ.program.setup[step] {
 		case "post-update configuration":
-			p.secureCopy(conn)
+			filepath := "post-update-files" + string(filepath.Separator) + p.typ.program.postUpdateFilename
+			p.secureCopy(conn, filepath)
 		case p.projectname.name + ".dev":
 			p.makeDirOnLocal(step)
 		case "git clone":
@@ -201,6 +209,10 @@ func (p *project) connect() {
 			p.installOnRemote(step, conn)
 		}
 	}
+
+	// Dealing with keys.
+	filepath := fileUtil.FindUserHomeDir() + string(filepath.Separator) + ".ssh/" + p.sshkey.name + ".pub"
+	p.secureCopy(conn, filepath)
 }
 
 func (p *project) installOnRemote(step int, conn *ssh.Client) {
@@ -229,7 +241,7 @@ func (p *project) installOnRemote(step int, conn *ssh.Client) {
 }
 
 // Secure Copy a file from local machine to remote host.
-func (p *project) secureCopy(conn *ssh.Client) {
+func (p *project) secureCopy(conn *ssh.Client, filepath string) {
 	session, err := conn.NewSession()
 	errorUtil.CheckError("Failed to build session: ", err)
 	defer session.Close()
@@ -240,7 +252,7 @@ func (p *project) secureCopy(conn *ssh.Client) {
 	go func() {
 		w, _ := session.StdinPipe()
 		defer w.Close()
-		content := fileUtil.ReadFile("post-update-files" + string(filepath.Separator) + p.typ.program.postUpdateFilename)
+		content := fileUtil.ReadFile(filepath)
 		fmt.Fprintln(w, "C0644", len(content), "post-update")
 		fmt.Fprint(w, content)
 		fmt.Fprint(w, "\x00")
@@ -292,5 +304,4 @@ func (p *project) gitOnLocal(step int) {
 	if err := cmd.Run(); err != nil {
 		log.Fatal("Failed to execute git clone: ", err)
 	}
-
 }
