@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -29,8 +28,6 @@ type project struct {
 	projectname, hostname, pwd, port, typ projectField
 }
 
-var postUpdateContent string // <------------ DEBUG FLAG
-
 func main() {
 
 	// Initialization
@@ -39,15 +36,7 @@ func main() {
 	// Let's build our project!
 	project.assemblyLine()
 
-	// SSH connection config
-	config := &ssh.ClientConfig{
-		User: project.projectname.name,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(project.pwd.name),
-		},
-	}
-
-	project.connect(config)
+	project.connect()
 	fmt.Println("Environment configuration done.")
 }
 
@@ -86,6 +75,32 @@ func (p *project) assemblyLine() {
 	p.typ.errorMsg = "error getting the project's type"
 	p.typ.validationMsg = "pay attention to the options"
 	p.typ.name = checkInput(ask4Input(&p.typ))
+
+	// Now we need to know which instalation we going to make.
+	// And once we get to know it, let's load the setup with
+	// the aproppriate set of files and commands.
+	if p.typ.name == "Yii" {
+
+		// Loading common steps into the selected setup
+		p.typ.program.setup = []string{}
+		p.typ.program.postUpdateFilename = "post-update-yii"
+	} else {
+
+		// Loading common steps into the selected setup
+		p.typ.program.setup = []string{
+			"echo -e '[User]\nname = Pipi, server girl' > .gitconfig",
+			"cd ~/www/www/ && git init",
+			"cd ~/www/www/ && touch readme.txt && git add . ",
+			"cd ~/www/www/ && git commit -m 'on the beginning was the commit'",
+			"cd ~/private/ && mkdir repos && cd repos && mkdir " + p.projectname.name + "_hub.git && cd " + p.projectname.name + "_hub.git && git --bare init",
+			"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git && git push hub master",
+			"post-update configuration",
+			"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git/hooks && chmod 755 post-update",
+			p.projectname.name + ".dev",
+			"git clone",
+		}
+		p.typ.program.postUpdateFilename = "post-update-wp"
+	}
 }
 
 // Takes the assemblyLine's data and mount the prompt for the user.
@@ -105,7 +120,6 @@ func ask4Input(field *projectField) (*projectField, string) {
 	} else if err != nil {
 		log.Fatal(field.errorMsg, err)
 	}
-
 	return field, input
 }
 
@@ -151,7 +165,17 @@ func checkInput(field *projectField, input string) string {
 }
 
 // Creates a ssh connection between the local machine and the remote server.
-func (p *project) connect(config *ssh.ClientConfig) {
+func (p *project) connect() {
+
+	// config *ssh.ClientConfig
+
+	// SSH connection config
+	config := &ssh.ClientConfig{
+		User: p.projectname.name,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(p.pwd.name),
+		},
+	}
 
 	fmt.Println("Trying connection...")
 
@@ -166,59 +190,16 @@ func (p *project) connect(config *ssh.ClientConfig) {
 	// Loops over the slice of commands to be executed on the remote.
 	for step := range p.typ.program.setup {
 
-		if p.typ.program.setup[step] == "post-update configuration" {
+		switch p.typ.program.setup[step] {
+		case "post-update configuration":
 			p.secureCopy(conn)
-		} else if p.typ.program.setup[step] == p.projectname.name+".dev" {
+		case p.projectname.name + ".dev":
 			p.makeDirOnLocal(step)
-		} else if p.typ.program.setup[step] == "git clone" {
+		case "git clone":
 			p.gitOnLocal(step)
-		} else {
+		default:
 			p.installOnRemote(step, conn)
 		}
-	}
-}
-
-func (p *project) gitOnLocal(step int) {
-	homeDir := getUserHomeDir()
-
-	if err := os.Chdir(homeDir + string(filepath.Separator) + "sites" + string(filepath.Separator) + p.projectname.name + ".dev/"); err != nil {
-		log.Fatal("Failed to change directory.")
-	}
-
-	repo := "ssh://" + p.projectname.name + "@" + p.hostname.name + "/home/" + p.projectname.name + "/private/repos/" + p.projectname.name + "_hub.git"
-
-	cmd := exec.Command("git", "clone", repo, ".")
-	if err := cmd.Run(); err != nil {
-		log.Fatal("Failed to execute git clone: ", err)
-	}
-
-}
-
-// Creates a directory on the local machine. Case the directory already exists
-// remove the old one and runs the function again.
-func (p *project) makeDirOnLocal(step int) {
-
-	fmt.Println("Creating directory...")
-
-	// Get the user home directory path.
-	homeDir := getUserHomeDir()
-
-	// The dir we want to create.
-	dir := homeDir + string(filepath.Separator) + "sites" + string(filepath.Separator) + p.typ.program.setup[step]
-
-	// Check if the directory already exists.
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err := os.Mkdir(dir, 0755)
-		errorUtil.CheckError("Failed to create directory.", err)
-		fmt.Println(dir + " successfully created.")
-	} else {
-		fmt.Println(dir + " already exist.\nRemoving old and creating new...")
-
-		// Remove the old one.
-		if err := os.RemoveAll(dir); err != nil {
-			log.Fatalf("Error removing %s\n%s", dir, err)
-		}
-		p.makeDirOnLocal(step)
 	}
 }
 
@@ -270,8 +251,46 @@ func (p *project) secureCopy(conn *ssh.Client) {
 	}
 }
 
-func getUserHomeDir() string {
-	usr, err := user.Current()
-	errorUtil.CheckError("Failed to locate user home directory ", err)
-	return usr.HomeDir
+// Creates a directory on the local machine. Case the directory already exists
+// remove the old one and runs the function again.
+func (p *project) makeDirOnLocal(step int) {
+
+	fmt.Println("Creating directory...")
+
+	// Get the user home directory path.
+	homeDir := fileUtil.FindUserHomeDir()
+
+	// The dir we want to create.
+	dir := homeDir + string(filepath.Separator) + "sites" + string(filepath.Separator) + p.typ.program.setup[step]
+
+	// Check if the directory already exists.
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err := os.Mkdir(dir, 0755)
+		errorUtil.CheckError("Failed to create directory.", err)
+		fmt.Println(dir + " successfully created.")
+	} else {
+		fmt.Println(dir + " already exist.\nRemoving old and creating new...")
+
+		// Remove the old one.
+		if err := os.RemoveAll(dir); err != nil {
+			log.Fatalf("Error removing %s\n%s", dir, err)
+		}
+		p.makeDirOnLocal(step)
+	}
+}
+
+func (p *project) gitOnLocal(step int) {
+	homeDir := fileUtil.FindUserHomeDir()
+
+	if err := os.Chdir(homeDir + string(filepath.Separator) + "sites" + string(filepath.Separator) + p.projectname.name + ".dev/"); err != nil {
+		log.Fatal("Failed to change directory.")
+	}
+
+	repo := "ssh://" + p.projectname.name + "@" + p.hostname.name + "/home/" + p.projectname.name + "/private/repos/" + p.projectname.name + "_hub.git"
+
+	cmd := exec.Command("git", "clone", repo, ".")
+	if err := cmd.Run(); err != nil {
+		log.Fatal("Failed to execute git clone: ", err)
+	}
+
 }
