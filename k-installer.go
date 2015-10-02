@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/alesr/errorUtil"
-	"github.com/alesr/fileUtil"
+	"github.com/alesr/error-util"
+	"github.com/alesr/file-util"
 	"golang.org/x/crypto/ssh"
 	"log"
 	"os"
