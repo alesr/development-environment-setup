@@ -3,15 +3,17 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/alesr/error-util"
-	"github.com/alesr/file-util"
-	"github.com/alesr/kes-input-helper"
-	"golang.org/x/crypto/ssh"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
+
+	"github.com/alesr/error-util"
+	"github.com/alesr/file-util"
+	"golang.org/x/crypto/ssh"
 )
 
 // A project is made of project fields which has a program on it.
@@ -37,7 +39,7 @@ func main() {
 	// Initialization
 	project := new(Project)
 
-	project.mode()
+	project.assemblyLine()
 
 	project.connect()
 
@@ -209,7 +211,6 @@ func (p *Project) connect() {
 		case p.projectname.name + ".dev":
 			p.makeDirOnLocal(step)
 		case "git clone on " + p.projectname.name + ".dev":
-			fmt.Println("AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH")
 			p.gitOnLocal(step)
 		case "copying ssh public key":
 			filepath := fileUtil.FindUserHomeDir() + sep + ".ssh/" + p.sshkey.name + ".pub"
@@ -260,7 +261,7 @@ func (p *Project) secureCopy(conn *ssh.Client, phase, filepath string) {
 		dest = "scp -qrt ~/private/repos/" + p.projectname.name + "_hub.git/hooks"
 	} else {
 		file = "authorized_keys"
-		dest = "scp -qrt ~/.ssh"
+		dest = "scp -qrt ~" + sep + ".ssh"
 	}
 
 	go func() {
@@ -274,10 +275,10 @@ func (p *Project) secureCopy(conn *ssh.Client, phase, filepath string) {
 
 	fmt.Printf("%s... %s\n", file, dest)
 
-	if err := session.Run(dest); err != nil {
+	ignoredError := "Reason was:  ()"
+	if err := session.Run(dest); err != nil && !strings.Contains(err.Error(), ignoredError) {
 		log.Fatal("Failed to run SCP: " + err.Error())
 	}
-
 }
 
 // Creates a directory on the local machine. Case the directory already exists
@@ -300,6 +301,10 @@ func (p *Project) makeDirOnLocal(step int) {
 	} else {
 		fmt.Println(dir + " already exist.\nRemoving old and creating new...")
 
+		if runtime.GOOS == "windows" {
+			fmt.Println("Hello from Windows")
+		}
+
 		// Remove the old one.
 		if err := os.RemoveAll(dir); err != nil {
 			log.Fatalf("Error removing %s\n%s", dir, err)
@@ -313,7 +318,7 @@ func (p *Project) gitOnLocal(step int) {
 
 	homeDir := fileUtil.FindUserHomeDir()
 
-	if err := os.Chdir(homeDir + sep + "sites" + sep + p.projectname.name + ".dev/"); err != nil {
+	if err := os.Chdir(homeDir + sep + "sites" + sep + p.projectname.name + ".dev" + sep); err != nil {
 		log.Fatal("Failed to change directory.")
 	} else {
 		repo := "ssh://" + p.projectname.name + "@" + p.host.name + "/home/" + p.projectname.name + "/private/repos/" + p.projectname.name + "_hub.git"
@@ -322,110 +327,26 @@ func (p *Project) gitOnLocal(step int) {
 
 		cmd := exec.Command("git", "clone", repo, ".")
 
+		// Stdout buffer
+		cmdOutput := &bytes.Buffer{}
+		// Attach buffer to command
+		cmd.Stdout = cmdOutput
+
+		var waitStatus syscall.WaitStatus
+
 		if err := cmd.Run(); err != nil {
-			log.Fatal("Failed to execute git clone: ", err)
-		}
-	}
-
-}
-
-func (p *Project) mode() {
-	fmt.Print("Selec the mode:\n\n[N]ormal\n[T]est\n[R]eset\n\n")
-
-	var mode string
-	_, err := fmt.Scanln(&mode)
-	errorUtil.CheckError("Failed to get user input: ", err)
-
-	lowerMode := strings.ToLower(mode)
-	if lowerMode == "t" || lowerMode == "test" {
-		sample := kesInputHelper.InputSampler()
-
-		p.projectname.name = sample[0]
-		p.host.name = sample[1]
-		p.pwd.name = sample[2]
-		p.port.name = sample[3]
-		p.typ.name = sample[4]
-		p.typ.name = sample[4]
-		p.sshkey.name = sample[5]
-
-		if p.typ.name == "Yii" {
-			// Loading common steps into the selected setup
-			p.typ.program.setup = []string{}
-			p.typ.program.postUpdateFilename = "post-update-yii"
-		} else {
-			// Loading common steps into the selected setup
-			p.typ.program.setup = []string{
-				"echo -e '[User]\nname = Pipi, server girl' > .gitconfig",
-				"cd ~/www/www/ && git init",
-				"cd ~/www/www/ && touch readme.txt && git add . ",
-				"cd ~/www/www/ && git commit -m 'on the beginning was the commit'",
-				"cd ~/private/ && mkdir repos && cd repos && mkdir " + p.projectname.name + "_hub.git && cd " + p.projectname.name + "_hub.git && git --bare init",
-				"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git && git push hub master",
-				"post-update configuration",
-				"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git/hooks && chmod 755 post-update",
-				p.projectname.name + ".dev",
-				"git clone on " + p.projectname.name + ".dev",
-				"copying ssh public key",
+			log.Println("Failed to execute git clone: ", err)
+			// Did the command fail because of an unsuccessful exit code
+			if exitError, ok := err.(*exec.ExitError); ok {
+				waitStatus = exitError.Sys().(syscall.WaitStatus)
+				printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
 			}
-			p.typ.program.postUpdateFilename = "post-update-wp"
 		}
-
-	} else if lowerMode == "n" || lowerMode == "normal" {
-		p.assemblyLine()
-	} else if lowerMode == "r" || lowerMode == "reset" {
-		resetHostEnv()
 	}
 }
 
-func resetHostEnv() {
-	sample := kesInputHelper.InputSampler()
-
-	// Removing .dev directory
-	// Get the user home directory path.
-	homeDir := fileUtil.FindUserHomeDir()
-
-	// The dir we want to create.
-	dir := homeDir + sep + "sites" + sep + sample[0] + ".dev"
-
-	// Check if the directory already exists.
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		fmt.Println("Directory does not exist. Moving on...")
-	} else {
-		// Remove the old one.
-		if err := os.RemoveAll(dir); err != nil {
-			log.Fatalf("Error removing %s\n%s", dir, err)
-		}
+func printLocalCmdOutput(out []byte) {
+	if len(out) > 0 {
+		fmt.Printf("==> Output: %s\n", out)
 	}
-
-	commands := []string{
-		"cd ~/private && rm -rf repos",
-		"cd ~/www/www && rm -rf * && rm -rf .*",
-	}
-
-	// SSH connection config
-	config := &ssh.ClientConfig{
-		User: sample[0],
-		Auth: []ssh.AuthMethod{
-			ssh.Password(sample[2]),
-		},
-	}
-
-	fmt.Println("\nTrying connection...")
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", sample[1], sample[3]), config)
-	errorUtil.CheckError("Failed to dial: ", err)
-	fmt.Println("Connection established.")
-
-	for i := range commands {
-		session, err := conn.NewSession()
-		errorUtil.CheckError("Failed to build session: ", err)
-		defer session.Close()
-
-		ignoredError := "Reason was:  ()"
-		if err := session.Run(commands[i]); err != nil && !strings.Contains(err.Error(), ignoredError) {
-			log.Fatal("Failed to execute remote cleaning: " + err.Error())
-		}
-	}
-
-	fmt.Println("Everything clean again.")
-	os.Exit(0)
 }
