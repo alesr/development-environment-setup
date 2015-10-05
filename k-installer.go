@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/alesr/error-util"
 	"github.com/alesr/file-util"
+	"github.com/alesr/kes-input-helper"
 	"golang.org/x/crypto/ssh"
 	"log"
 	"os"
@@ -24,8 +25,9 @@ type projectField struct {
 	program                                             program
 }
 
-type project struct {
-	projectname, hostname, pwd, port, typ, sshkey projectField
+// Project - Defines a K project.
+type Project struct {
+	projectname, host, pwd, port, typ, sshkey projectField
 }
 
 var sep = string(filepath.Separator)
@@ -33,17 +35,20 @@ var sep = string(filepath.Separator)
 func main() {
 
 	// Initialization
-	project := new(project)
+	project := new(Project)
 
-	// Let's build our project!
-	project.assemblyLine()
+	project.mode()
 
 	project.connect()
 
-	fmt.Println("Environment configuration done.")
+	fmt.Println("Environment configuration done.\nHit enter to exit O.o")
+	var mode string
+	_, err := fmt.Scanln(&mode)
+	os.Exit(0)
+	errorUtil.CheckError("Failed to get user input: ", err)
 }
 
-func (p *project) assemblyLine() {
+func (p *Project) assemblyLine() {
 	// project name
 	p.projectname.inputQuestion = "project name: "
 	p.projectname.label = "projectname"
@@ -52,11 +57,11 @@ func (p *project) assemblyLine() {
 	p.projectname.name = checkInput(ask4Input(&p.projectname))
 
 	// Hostname
-	p.hostname.inputQuestion = "hostname: "
-	p.hostname.label = "hostname"
-	p.hostname.errorMsg = "error getting the project's hostname: "
-	p.hostname.validationMsg = "make sure you type a valid hostname for your project. it must contain '.com', '.pt' or '.org', for example.)."
-	p.hostname.name = checkInput(ask4Input(&p.hostname))
+	p.host.inputQuestion = "hostname: "
+	p.host.label = "hostname"
+	p.host.errorMsg = "error getting the project's hostname: "
+	p.host.validationMsg = "make sure you type a valid hostname for your project. it must contain '.com', '.pt' or '.org', for example.)."
+	p.host.name = checkInput(ask4Input(&p.host))
 
 	// Password
 	p.pwd.inputQuestion = "password: "
@@ -94,7 +99,6 @@ func (p *project) assemblyLine() {
 		p.typ.program.setup = []string{}
 		p.typ.program.postUpdateFilename = "post-update-yii"
 	} else {
-
 		// Loading common steps into the selected setup
 		p.typ.program.setup = []string{
 			"echo -e '[User]\nname = Pipi, server girl' > .gitconfig",
@@ -106,8 +110,7 @@ func (p *project) assemblyLine() {
 			"post-update configuration",
 			"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git/hooks && chmod 755 post-update",
 			p.projectname.name + ".dev",
-			"git clone",
-			// "touch ~/.ssh/authorized_keys",
+			"git clone on " + p.projectname.name + ".dev",
 			"copying ssh public key",
 		}
 		p.typ.program.postUpdateFilename = "post-update-wp"
@@ -176,7 +179,7 @@ func checkInput(field *projectField, input string) string {
 }
 
 // Creates a ssh connection between the local machine and the remote server.
-func (p *project) connect() {
+func (p *Project) connect() {
 
 	// SSH connection config
 	config := &ssh.ClientConfig{
@@ -186,9 +189,9 @@ func (p *project) connect() {
 		},
 	}
 
-	fmt.Println("Trying connection...")
+	fmt.Println("\nTrying connection...")
 
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", p.hostname.name, p.port.name), config)
+	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", p.host.name, p.port.name), config)
 	errorUtil.CheckError("Failed to dial: ", err)
 	fmt.Println("Connection established.")
 
@@ -205,7 +208,8 @@ func (p *project) connect() {
 			p.secureCopy(conn, "post-update configuration", filepath)
 		case p.projectname.name + ".dev":
 			p.makeDirOnLocal(step)
-		case "git clone":
+		case "git clone on " + p.projectname.name + ".dev":
+			fmt.Println("AHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH")
 			p.gitOnLocal(step)
 		case "copying ssh public key":
 			filepath := fileUtil.FindUserHomeDir() + sep + ".ssh/" + p.sshkey.name + ".pub"
@@ -216,7 +220,7 @@ func (p *project) connect() {
 	}
 }
 
-func (p *project) installOnRemote(step int, conn *ssh.Client) {
+func (p *Project) installOnRemote(step int, conn *ssh.Client) {
 
 	// Git and some other programs can send us an unsuccessful exit (< 0)
 	// even if the command was successfully executed on the remote shell.
@@ -242,7 +246,7 @@ func (p *project) installOnRemote(step int, conn *ssh.Client) {
 }
 
 // Secure Copy a file from local machine to remote host.
-func (p *project) secureCopy(conn *ssh.Client, phase, filepath string) {
+func (p *Project) secureCopy(conn *ssh.Client, phase, filepath string) {
 	session, err := conn.NewSession()
 	errorUtil.CheckError("Failed to build session: ", err)
 	defer session.Close()
@@ -278,7 +282,7 @@ func (p *project) secureCopy(conn *ssh.Client, phase, filepath string) {
 
 // Creates a directory on the local machine. Case the directory already exists
 // remove the old one and runs the function again.
-func (p *project) makeDirOnLocal(step int) {
+func (p *Project) makeDirOnLocal(step int) {
 
 	fmt.Println("Creating directory...")
 
@@ -305,17 +309,123 @@ func (p *project) makeDirOnLocal(step int) {
 }
 
 // Git clone on local machine
-func (p *project) gitOnLocal(step int) {
+func (p *Project) gitOnLocal(step int) {
+
 	homeDir := fileUtil.FindUserHomeDir()
 
 	if err := os.Chdir(homeDir + sep + "sites" + sep + p.projectname.name + ".dev/"); err != nil {
 		log.Fatal("Failed to change directory.")
+	} else {
+		repo := "ssh://" + p.projectname.name + "@" + p.host.name + "/home/" + p.projectname.name + "/private/repos/" + p.projectname.name + "_hub.git"
+
+		fmt.Println("Cloning repository...")
+
+		cmd := exec.Command("git", "clone", repo, ".")
+
+		if err := cmd.Run(); err != nil {
+			log.Fatal("Failed to execute git clone: ", err)
+		}
 	}
 
-	repo := "ssh://" + p.projectname.name + "@" + p.hostname.name + "/home/" + p.projectname.name + "/private/repos/" + p.projectname.name + "_hub.git"
+}
 
-	cmd := exec.Command("git", "clone", repo, ".")
-	if err := cmd.Run(); err != nil {
-		log.Fatal("Failed to execute git clone: ", err)
+func (p *Project) mode() {
+	fmt.Print("Selec the mode:\n\n[N]ormal\n[T]est\n[R]eset\n\n")
+
+	var mode string
+	_, err := fmt.Scanln(&mode)
+	errorUtil.CheckError("Failed to get user input: ", err)
+
+	lowerMode := strings.ToLower(mode)
+	if lowerMode == "t" || lowerMode == "test" {
+		sample := kesInputHelper.InputSampler()
+
+		p.projectname.name = sample[0]
+		p.host.name = sample[1]
+		p.pwd.name = sample[2]
+		p.port.name = sample[3]
+		p.typ.name = sample[4]
+		p.typ.name = sample[4]
+		p.sshkey.name = sample[5]
+
+		if p.typ.name == "Yii" {
+			// Loading common steps into the selected setup
+			p.typ.program.setup = []string{}
+			p.typ.program.postUpdateFilename = "post-update-yii"
+		} else {
+			// Loading common steps into the selected setup
+			p.typ.program.setup = []string{
+				"echo -e '[User]\nname = Pipi, server girl' > .gitconfig",
+				"cd ~/www/www/ && git init",
+				"cd ~/www/www/ && touch readme.txt && git add . ",
+				"cd ~/www/www/ && git commit -m 'on the beginning was the commit'",
+				"cd ~/private/ && mkdir repos && cd repos && mkdir " + p.projectname.name + "_hub.git && cd " + p.projectname.name + "_hub.git && git --bare init",
+				"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git && git push hub master",
+				"post-update configuration",
+				"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git/hooks && chmod 755 post-update",
+				p.projectname.name + ".dev",
+				"git clone on " + p.projectname.name + ".dev",
+				"copying ssh public key",
+			}
+			p.typ.program.postUpdateFilename = "post-update-wp"
+		}
+
+	} else if lowerMode == "n" || lowerMode == "normal" {
+		p.assemblyLine()
+	} else if lowerMode == "r" || lowerMode == "reset" {
+		resetHostEnv()
 	}
+}
+
+func resetHostEnv() {
+	sample := kesInputHelper.InputSampler()
+
+	// Removing .dev directory
+	// Get the user home directory path.
+	homeDir := fileUtil.FindUserHomeDir()
+
+	// The dir we want to create.
+	dir := homeDir + sep + "sites" + sep + sample[0] + ".dev"
+
+	// Check if the directory already exists.
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		fmt.Println("Directory does not exist. Moving on...")
+	} else {
+		// Remove the old one.
+		if err := os.RemoveAll(dir); err != nil {
+			log.Fatalf("Error removing %s\n%s", dir, err)
+		}
+	}
+
+	commands := []string{
+		"cd ~/private && rm -rf repos",
+		"cd ~/www/www && rm -rf * && rm -rf .*",
+	}
+
+	// SSH connection config
+	config := &ssh.ClientConfig{
+		User: sample[0],
+		Auth: []ssh.AuthMethod{
+			ssh.Password(sample[2]),
+		},
+	}
+
+	fmt.Println("\nTrying connection...")
+	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", sample[1], sample[3]), config)
+	errorUtil.CheckError("Failed to dial: ", err)
+	fmt.Println("Connection established.")
+
+	for i := range commands {
+		session, err := conn.NewSession()
+		errorUtil.CheckError("Failed to build session: ", err)
+		defer session.Close()
+
+		ignoredError := "Reason was:  ()"
+		if err := session.Run(commands[i]); err != nil && !strings.Contains(err.Error(), ignoredError) {
+			log.Fatal("Failed to execute remote cleaning: " + err.Error())
+		}
+	}
+
+	fmt.Println("Everything clean again.")
+	os.Exit(0)
 }
