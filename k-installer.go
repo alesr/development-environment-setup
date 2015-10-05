@@ -28,6 +28,8 @@ type project struct {
 	projectname, hostname, pwd, port, typ, sshkey projectField
 }
 
+var sep = string(filepath.Separator)
+
 func main() {
 
 	// Initialization
@@ -199,14 +201,14 @@ func (p *project) connect() {
 
 		switch p.typ.program.setup[step] {
 		case "post-update configuration":
-			filepath := "post-update-files" + string(filepath.Separator) + p.typ.program.postUpdateFilename
+			filepath := "post-update-files" + sep + p.typ.program.postUpdateFilename
 			p.secureCopy(conn, "post-update configuration", filepath)
 		case p.projectname.name + ".dev":
 			p.makeDirOnLocal(step)
 		case "git clone":
 			p.gitOnLocal(step)
 		case "copying ssh public key":
-			filepath := fileUtil.FindUserHomeDir() + string(filepath.Separator) + ".ssh/" + p.sshkey.name + ".pub"
+			filepath := fileUtil.FindUserHomeDir() + sep + ".ssh/" + p.sshkey.name + ".pub"
 			p.secureCopy(conn, "copying ssh public key", filepath)
 		default:
 			p.installOnRemote(step, conn)
@@ -266,7 +268,7 @@ func (p *project) secureCopy(conn *ssh.Client, phase, filepath string) {
 		fmt.Fprint(w, "\x00")
 	}()
 
-	fmt.Println(dest)
+	fmt.Printf("%s... %s\n", file, dest)
 
 	if err := session.Run(dest); err != nil {
 		log.Fatal("Failed to run SCP: " + err.Error())
@@ -284,7 +286,7 @@ func (p *project) makeDirOnLocal(step int) {
 	homeDir := fileUtil.FindUserHomeDir()
 
 	// The dir we want to create.
-	dir := homeDir + string(filepath.Separator) + "sites" + string(filepath.Separator) + p.typ.program.setup[step]
+	dir := homeDir + sep + "sites" + sep + p.typ.program.setup[step]
 
 	// Check if the directory already exists.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -306,7 +308,7 @@ func (p *project) makeDirOnLocal(step int) {
 func (p *project) gitOnLocal(step int) {
 	homeDir := fileUtil.FindUserHomeDir()
 
-	if err := os.Chdir(homeDir + string(filepath.Separator) + "sites" + string(filepath.Separator) + p.projectname.name + ".dev/"); err != nil {
+	if err := os.Chdir(homeDir + sep + "sites" + sep + p.projectname.name + ".dev/"); err != nil {
 		log.Fatal("Failed to change directory.")
 	}
 
