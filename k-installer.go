@@ -105,6 +105,8 @@ func (p *project) assemblyLine() {
 			"cd ~/www/www && git remote add hub ~/private/repos/" + p.projectname.name + "_hub.git/hooks && chmod 755 post-update",
 			p.projectname.name + ".dev",
 			"git clone",
+			// "touch ~/.ssh/authorized_keys",
+			"copying ssh public key",
 		}
 		p.typ.program.postUpdateFilename = "post-update-wp"
 	}
@@ -174,8 +176,6 @@ func checkInput(field *projectField, input string) string {
 // Creates a ssh connection between the local machine and the remote server.
 func (p *project) connect() {
 
-	// config *ssh.ClientConfig
-
 	// SSH connection config
 	config := &ssh.ClientConfig{
 		User: p.projectname.name,
@@ -200,19 +200,18 @@ func (p *project) connect() {
 		switch p.typ.program.setup[step] {
 		case "post-update configuration":
 			filepath := "post-update-files" + string(filepath.Separator) + p.typ.program.postUpdateFilename
-			p.secureCopy(conn, filepath)
+			p.secureCopy(conn, "post-update configuration", filepath)
 		case p.projectname.name + ".dev":
 			p.makeDirOnLocal(step)
 		case "git clone":
 			p.gitOnLocal(step)
+		case "copying ssh public key":
+			filepath := fileUtil.FindUserHomeDir() + string(filepath.Separator) + ".ssh/" + p.sshkey.name + ".pub"
+			p.secureCopy(conn, "copying ssh public key", filepath)
 		default:
 			p.installOnRemote(step, conn)
 		}
 	}
-
-	// Dealing with keys.
-	filepath := fileUtil.FindUserHomeDir() + string(filepath.Separator) + ".ssh/" + p.sshkey.name + ".pub"
-	p.secureCopy(conn, filepath)
 }
 
 func (p *project) installOnRemote(step int, conn *ssh.Client) {
@@ -241,7 +240,7 @@ func (p *project) installOnRemote(step int, conn *ssh.Client) {
 }
 
 // Secure Copy a file from local machine to remote host.
-func (p *project) secureCopy(conn *ssh.Client, filepath string) {
+func (p *project) secureCopy(conn *ssh.Client, phase, filepath string) {
 	session, err := conn.NewSession()
 	errorUtil.CheckError("Failed to build session: ", err)
 	defer session.Close()
@@ -249,18 +248,30 @@ func (p *project) secureCopy(conn *ssh.Client, filepath string) {
 	var stdoutBuf bytes.Buffer
 	session.Stdout = &stdoutBuf
 
+	var file, dest string
+	if phase == "post-update configuration" {
+		file = "post-update"
+		dest = "scp -qrt ~/private/repos/" + p.projectname.name + "_hub.git/hooks"
+	} else {
+		file = "authorized_keys"
+		dest = "scp -qrt ~/.ssh"
+	}
+
 	go func() {
 		w, _ := session.StdinPipe()
 		defer w.Close()
 		content := fileUtil.ReadFile(filepath)
-		fmt.Fprintln(w, "C0644", len(content), "post-update")
+		fmt.Fprintln(w, "C0644", len(content), file)
 		fmt.Fprint(w, content)
 		fmt.Fprint(w, "\x00")
 	}()
 
-	if err := session.Run("scp -qrt ~/private/repos/" + p.projectname.name + "_hub.git/hooks"); err != nil {
+	fmt.Println(dest)
+
+	if err := session.Run(dest); err != nil {
 		log.Fatal("Failed to run SCP: " + err.Error())
 	}
+
 }
 
 // Creates a directory on the local machine. Case the directory already exists
@@ -291,6 +302,7 @@ func (p *project) makeDirOnLocal(step int) {
 	}
 }
 
+// Git clone on local machine
 func (p *project) gitOnLocal(step int) {
 	homeDir := fileUtil.FindUserHomeDir()
 
