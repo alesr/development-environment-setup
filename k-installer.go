@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/alesr/error-util"
 	"github.com/alesr/file-util"
@@ -183,18 +184,16 @@ func checkInput(field *projectField, input string) string {
 // Creates a ssh connection between the local machine and the remote server.
 func (p *Project) connect() {
 
-	// SSH connection config
-	config := &ssh.ClientConfig{
-		User: p.projectname.name,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(p.pwd.name),
-		},
-	}
+	ticker := time.NewTicker(time.Millisecond * 800)
+	go func() {
+		for _ = range ticker.C {
+			fmt.Println("Trying connection...")
+		}
+	}()
+	time.Sleep(time.Millisecond * 1500)
 
-	fmt.Println("\nTrying connection...")
-
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", p.host.name, p.port.name), config)
-	errorUtil.CheckError("Failed to dial: ", err)
+	conn := p.dial()
+	ticker.Stop()
 	fmt.Println("Connection established.")
 
 	session, err := conn.NewSession()
@@ -219,6 +218,24 @@ func (p *Project) connect() {
 			p.installOnRemote(step, conn)
 		}
 	}
+}
+
+func (p *Project) dial() *ssh.Client {
+	// SSH connection config
+	config := &ssh.ClientConfig{
+		User: p.projectname.name,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(p.pwd.name),
+		},
+	}
+	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", p.host.name, p.port.name), config)
+	// errorUtil.CheckError("Failed to dial: ", err)
+	if err != nil {
+		log.Println("Failed to dial: ", err)
+		log.Println("Trying again...")
+		p.dial()
+	}
+	return conn
 }
 
 func (p *Project) installOnRemote(step int, conn *ssh.Client) {
