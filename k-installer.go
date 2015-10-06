@@ -233,7 +233,7 @@ func (p *Project) dial() *ssh.Client {
 	if err != nil {
 		log.Println("Failed to dial: ", err)
 		log.Println("Trying again...")
-		p.dial()
+		p.connect()
 	}
 	return conn
 }
