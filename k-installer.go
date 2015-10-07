@@ -35,19 +35,21 @@ type Project struct {
 var sep = string(filepath.Separator)
 
 func main() {
+	var project *Project
 
 	// Initialization
-	project := new(Project)
-
+	project = new(Project)
 	project.assemblyLine()
 
-	project.connect()
+	mode := mode()
 
-	fmt.Println("Environment configuration done.\nHit enter to exit O.o")
-	var mode string
-	_, err := fmt.Scanln(&mode)
-	os.Exit(0)
-	errorUtil.CheckError("Failed to get user input: ", err)
+	if mode == "new project" {
+
+		project.connect()
+	} else {
+		project.insertSshkey()
+	}
+
 }
 
 func (p *Project) assemblyLine() {
@@ -360,6 +362,77 @@ func (p *Project) gitOnLocal(step int) {
 
 func printLocalCmdOutput(out []byte) {
 	if len(out) > 0 {
-		fmt.Printf("==> Output: %s\n", out)
+		fmt.Println(out)
 	}
+}
+
+func mode() string {
+
+	var input, mode string
+
+	fmt.Print("[1] Add new project\n[2] Add user to an existing project\n")
+
+	_, err := fmt.Scanln(&input)
+	errorUtil.CheckError("Failed to read user input: ", err)
+
+	if input == "1" {
+
+		var confirmation string
+		fmt.Print("Be aware that setting a new project will overwrite all previous environment configuration.\nDo you want to continue? [Y] [N]: ")
+		_, err := fmt.Scanln(&confirmation)
+		errorUtil.CheckError("Failed to read user input222: ", err)
+
+		if confirmation == strings.ToLower("y") || confirmation == strings.ToLower("yes") {
+			mode = "new project"
+		} else {
+			fmt.Println("Exiting program...")
+			os.Exit(0)
+		}
+
+	} else if input == "2" {
+		mode = "new user"
+	} else {
+		fmt.Println("Please type 1 or 2 to select the options.")
+		main()
+	}
+	return mode
+}
+
+func (p *Project) insertSshkey() {
+
+	homeDir := fileUtil.FindUserHomeDir()
+
+	// ssh -c Foo bar@example.com` ficaria: `exec.Command("ssh", "-c", "Foo", "bar@example.com")`
+	// cmd := exec.Command("cat", homeDir+"/.ssh/"+p.sshkey.name+".pub", "|", "ssh", p.projectname.name+"@"+p.host.name, "'cat", ">>", "~/.ssh/authorized_keys'")
+	cmd := exec.Command("bash -c cat" + homeDir +"/.ssh/"+p.sshkey.name.pub + " | ssh"+ p.projectname.name+"@"+p.host.name, 'cat", ">>", "~/.ssh/authorized_keys'")
+
+	// Stdout buffer
+	cmdOutput := &bytes.Buffer{}
+	// Attach buffer to command
+	cmd.Stdout = cmdOutput
+
+	//var waitStatus syscall.WaitStatus
+
+	err := cmd.Run()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(stdout)
+
+	// if err != nil {
+	// 	os.Stderr.WriteString(fmt.Sprintf("==> Error: %s\n", err.Error()))
+	//
+	// 	// Did the command fail because of an unsuccessful exit code
+	// 	if exitError, ok := err.(*exec.ExitError); ok {
+	// 		waitStatus = exitError.Sys().(syscall.WaitStatus)
+	// 		printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
+	// 	}
+	// } else {
+	// 	// Command was successful
+	// 	waitStatus = cmd.ProcessState.Sys().(syscall.WaitStatus)
+	// 	printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
+	// }
 }
