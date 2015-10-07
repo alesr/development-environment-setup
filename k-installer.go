@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -318,10 +317,6 @@ func (p *Project) makeDirOnLocal(step int) {
 	} else {
 		fmt.Println(dir + " already exist.\nRemoving old and creating new...")
 
-		if runtime.GOOS == "windows" {
-			fmt.Println("Hello from Windows")
-		}
-
 		// Remove the old one.
 		if err := os.RemoveAll(dir); err != nil {
 			log.Fatalf("Error removing %s\n%s", dir, err)
@@ -353,6 +348,7 @@ func (p *Project) gitOnLocal(step int) {
 
 		if err := cmd.Run(); err != nil {
 			log.Println("Failed to execute git clone: ", err)
+
 			// Did the command fail because of an unsuccessful exit code
 			if exitError, ok := err.(*exec.ExitError); ok {
 				waitStatus = exitError.Sys().(syscall.WaitStatus)
