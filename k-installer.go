@@ -400,54 +400,17 @@ func mode() string {
 
 func (p *Project) insertSshkey() {
 
-	//homeDir := fileUtil.FindUserHomeDir()
-
-	identity := fmt.Sprintf("cat %s/.ssh/%s.pub", fileUtil.FindUserHomeDir(), p.sshkey.name)
-	address := fmt.Sprintf("| ssh %s@%s 'cat >> ~/.ssh/authorized_keys'", p.projectname.name, p.host.name)
-
-	// Replace `ls` (and its arguments) with something more interesting
-	// cmd := exec.Command(identity, address).Output()
-	if cmd, err := exec.Command(identity, address).Output(); err != nil {
-		fmt.Fprintln(os.Stderr, "There was an error running git rev-parse command: ", err)
-		os.Exit(1)
+	keyFile, err := os.Open(fileUtil.FindUserHomeDir() + sep + ".ssh" + sep + p.sshkey.name + ".pub")
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
-	// cmd.Run()
-	// fmt.Println(identity, address)
+	cmd := exec.Command("ssh", p.projectname.name+"@"+p.host.name, "cat >> ~/.ssh/authorized_keys")
+	cmd.Stdin = keyFile
 
-	// // ssh -c Foo bar@example.com` ficaria: `exec.Command("ssh", "-c", "Foo", "bar@example.com")`
-	// // cmd := exec.Command("cat", homeDir+"/.ssh/"+p.sshkey.name+".pub", "|", "ssh", p.projectname.name+"@"+p.host.name, "'cat", ">>", "~/.ssh/authorized_keys'")
-	// cmd := exec.Command("bash -c cat" + homeDir +"/.ssh/"+p.sshkey.name.pub + " | ssh"+ p.projectname.name+"@"+p.host.name, 'cat", ">>", "~/.ssh/authorized_keys'")
-
-	// // Stdout buffer
-	// cmdOutput := &bytes.Buffer{}
-	// // Attach buffer to command
-	// cmd.Stdout = cmdOutput
-	//
-	// //var waitStatus syscall.WaitStatus
-	//
-	// err := cmd.Run()
-	//
-	// stdout, err := cmd.StdoutPipe()
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	//
-	// fmt.Println(stdout)
-
-	// if err != nil {
-	// 	os.Stderr.WriteString(fmt.Sprintf("==> Error: %s\n", err.Error()))
-	//
-	// 	// Did the command fail because of an unsuccessful exit code
-	// 	if exitError, ok := err.(*exec.ExitError); ok {
-	// 		waitStatus = exitError.Sys().(syscall.WaitStatus)
-	// 		printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
-	// 	}
-	// } else {
-	// 	// Command was successful
-	// 	waitStatus = cmd.ProcessState.Sys().(syscall.WaitStatus)
-	// 	printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
-	// }
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println(string(out))
+		log.Fatal(err)
+	}
 }
