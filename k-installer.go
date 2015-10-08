@@ -400,27 +400,42 @@ func mode() string {
 
 func (p *Project) insertSshkey() {
 
-	homeDir := fileUtil.FindUserHomeDir()
+	//homeDir := fileUtil.FindUserHomeDir()
 
-	// ssh -c Foo bar@example.com` ficaria: `exec.Command("ssh", "-c", "Foo", "bar@example.com")`
-	// cmd := exec.Command("cat", homeDir+"/.ssh/"+p.sshkey.name+".pub", "|", "ssh", p.projectname.name+"@"+p.host.name, "'cat", ">>", "~/.ssh/authorized_keys'")
-	cmd := exec.Command("bash -c cat" + homeDir +"/.ssh/"+p.sshkey.name.pub + " | ssh"+ p.projectname.name+"@"+p.host.name, 'cat", ">>", "~/.ssh/authorized_keys'")
+	identity := fmt.Sprintf("cat %s/.ssh/%s.pub", fileUtil.FindUserHomeDir(), p.sshkey.name)
+	address := fmt.Sprintf("| ssh %s@%s 'cat >> ~/.ssh/authorized_keys'", p.projectname.name, p.host.name)
 
-	// Stdout buffer
-	cmdOutput := &bytes.Buffer{}
-	// Attach buffer to command
-	cmd.Stdout = cmdOutput
-
-	//var waitStatus syscall.WaitStatus
-
-	err := cmd.Run()
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Fatal(err)
+	// Replace `ls` (and its arguments) with something more interesting
+	// cmd := exec.Command(identity, address).Output()
+	if cmd, err := exec.Command(identity, address).Output(); err != nil {
+		fmt.Fprintln(os.Stderr, "There was an error running git rev-parse command: ", err)
+		os.Exit(1)
 	}
 
-	fmt.Println(stdout)
+	// cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
+	// cmd.Run()
+	// fmt.Println(identity, address)
+
+	// // ssh -c Foo bar@example.com` ficaria: `exec.Command("ssh", "-c", "Foo", "bar@example.com")`
+	// // cmd := exec.Command("cat", homeDir+"/.ssh/"+p.sshkey.name+".pub", "|", "ssh", p.projectname.name+"@"+p.host.name, "'cat", ">>", "~/.ssh/authorized_keys'")
+	// cmd := exec.Command("bash -c cat" + homeDir +"/.ssh/"+p.sshkey.name.pub + " | ssh"+ p.projectname.name+"@"+p.host.name, 'cat", ">>", "~/.ssh/authorized_keys'")
+
+	// // Stdout buffer
+	// cmdOutput := &bytes.Buffer{}
+	// // Attach buffer to command
+	// cmd.Stdout = cmdOutput
+	//
+	// //var waitStatus syscall.WaitStatus
+	//
+	// err := cmd.Run()
+	//
+	// stdout, err := cmd.StdoutPipe()
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	//
+	// fmt.Println(stdout)
 
 	// if err != nil {
 	// 	os.Stderr.WriteString(fmt.Sprintf("==> Error: %s\n", err.Error()))
