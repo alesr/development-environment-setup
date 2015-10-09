@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,12 +45,13 @@ func main() {
 	mode := mode()
 
 	if mode == "new project" {
-
 		project.connect()
 	} else {
 		project.insertSshkey()
+		project.makeDirOnLocal()
+		project.gitOnLocal()
+		fmt.Println("User added with success.")
 	}
-
 }
 
 func (p *Project) assemblyLine() {
@@ -209,9 +211,9 @@ func (p *Project) connect() {
 			filepath := "post-update-files" + sep + p.typ.program.postUpdateFilename
 			p.secureCopy(conn, "post-update configuration", filepath)
 		case p.projectname.name + ".dev":
-			p.makeDirOnLocal(step)
+			p.makeDirOnLocal()
 		case "git clone on " + p.projectname.name + ".dev":
-			p.gitOnLocal(step)
+			p.gitOnLocal()
 		case "copying ssh public key":
 			filepath := fileUtil.FindUserHomeDir() + sep + ".ssh/" + p.sshkey.name + ".pub"
 			p.secureCopy(conn, "copying ssh public key", filepath)
@@ -301,7 +303,7 @@ func (p *Project) secureCopy(conn *ssh.Client, phase, filepath string) {
 
 // Creates a directory on the local machine. Case the directory already exists
 // remove the old one and runs the function again.
-func (p *Project) makeDirOnLocal(step int) {
+func (p *Project) makeDirOnLocal() {
 
 	fmt.Println("Creating directory...")
 
@@ -309,7 +311,7 @@ func (p *Project) makeDirOnLocal(step int) {
 	homeDir := fileUtil.FindUserHomeDir()
 
 	// The dir we want to create.
-	dir := homeDir + sep + "sites" + sep + p.typ.program.setup[step]
+	dir := homeDir + sep + "sites" + sep + p.projectname.name + ".dev"
 
 	// Check if the directory already exists.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -323,12 +325,12 @@ func (p *Project) makeDirOnLocal(step int) {
 		if err := os.RemoveAll(dir); err != nil {
 			log.Fatalf("Error removing %s\n%s", dir, err)
 		}
-		p.makeDirOnLocal(step)
+		p.makeDirOnLocal()
 	}
 }
 
 // Git clone on local machine
-func (p *Project) gitOnLocal(step int) {
+func (p *Project) gitOnLocal() {
 
 	homeDir := fileUtil.FindUserHomeDir()
 
@@ -357,6 +359,12 @@ func (p *Project) gitOnLocal(step int) {
 				printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
 			}
 		}
+
+		wg := new(sync.WaitGroup)
+		wg.Add(3)
+
+		exeCmd("git remote rename origin hub", wg)
+
 	}
 }
 
@@ -400,6 +408,8 @@ func mode() string {
 
 func (p *Project) insertSshkey() {
 
+	fmt.Println("Copying public key...")
+
 	keyFile, err := os.Open(fileUtil.FindUserHomeDir() + sep + ".ssh" + sep + p.sshkey.name + ".pub")
 	if err != nil {
 		log.Fatal(err)
@@ -413,4 +423,19 @@ func (p *Project) insertSshkey() {
 		fmt.Println(string(out))
 		log.Fatal(err)
 	}
+}
+
+func exeCmd(cmd string, wg *sync.WaitGroup) {
+	fmt.Println("command is ", cmd)
+	// splitting head => g++ parts => rest of the command
+	parts := strings.Fields(cmd)
+	head := parts[0]
+	parts = parts[1:len(parts)]
+
+	out, err := exec.Command(head, parts...).Output()
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+	fmt.Printf("%s", out)
+	wg.Done() // Need to signal to waitgroup that this goroutine is done
 }
