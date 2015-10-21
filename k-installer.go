@@ -9,10 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/alesr/error-util"
 	"github.com/alesr/file-util"
 	"golang.org/x/crypto/ssh"
 )
@@ -36,25 +34,26 @@ type Project struct {
 var sep = string(filepath.Separator)
 
 func main() {
-	var project *Project
 
 	// Initialization
-	project = new(Project)
-	project.assemblyLine()
+	project := new(Project)
+	project.newProject()
 
 	mode := mode()
 
 	if mode == "new project" {
 		project.connect()
+		fmt.Printf("Project successfully created.")
 	} else {
 		project.insertSshkey()
 		project.makeDirOnLocal()
 		project.gitOnLocal()
-		fmt.Println("User added with success.")
+		fmt.Println("User successfully added.")
 	}
 }
 
-func (p *Project) assemblyLine() {
+func (p *Project) newProject() {
+
 	// project name
 	p.projectname.inputQuestion = "project name: "
 	p.projectname.label = "projectname"
@@ -200,23 +199,36 @@ func (p *Project) connect() {
 	fmt.Println("Connection established.")
 
 	session, err := conn.NewSession()
-	errorUtil.CheckError("Failed to build session: ", err)
+	if err != nil {
+		log.Fatal("Failed to build session: ", err)
+	}
+
 	defer session.Close()
 
 	// Loops over the slice of commands to be executed on the remote.
 	for step := range p.typ.program.setup {
 
 		switch p.typ.program.setup[step] {
+
 		case "post-update configuration":
 			filepath := "post-update-files" + sep + p.typ.program.postUpdateFilename
 			p.secureCopy(conn, "post-update configuration", filepath)
+
 		case p.projectname.name + ".dev":
 			p.makeDirOnLocal()
+
 		case "git clone on " + p.projectname.name + ".dev":
 			p.gitOnLocal()
+
 		case "copying ssh public key":
-			filepath := fileUtil.FindUserHomeDir() + sep + ".ssh/" + p.sshkey.name + ".pub"
+			userHomeDir, err := fileUtil.FindUserHomeDir()
+			if err != nil {
+				log.Fatal("Failed to find user home directory: ", err)
+			}
+
+			filepath := userHomeDir + sep + ".ssh/" + p.sshkey.name + ".pub"
 			p.secureCopy(conn, "copying ssh public key", filepath)
+
 		default:
 			p.installOnRemote(step, conn)
 		}
@@ -232,7 +244,6 @@ func (p *Project) dial() *ssh.Client {
 		},
 	}
 	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", p.host.name, p.port.name), config)
-	// errorUtil.CheckError("Failed to dial: ", err)
 	if err != nil {
 		log.Println("Failed to dial: ", err)
 		log.Println("Trying again...")
@@ -250,7 +261,10 @@ func (p *Project) installOnRemote(step int, conn *ssh.Client) {
 
 	// Creates a session over the ssh connection to execute the commands
 	session, err := conn.NewSession()
-	errorUtil.CheckError("Failed to build session: ", err)
+	if err != nil {
+		log.Fatal("Failed to build session: ", err)
+	}
+
 	defer session.Close()
 
 	var stdoutBuf bytes.Buffer
@@ -269,7 +283,10 @@ func (p *Project) installOnRemote(step int, conn *ssh.Client) {
 // Secure Copy a file from local machine to remote host.
 func (p *Project) secureCopy(conn *ssh.Client, phase, filepath string) {
 	session, err := conn.NewSession()
-	errorUtil.CheckError("Failed to build session: ", err)
+	if err != nil {
+		log.Fatal("Failed to build session: ", err)
+	}
+
 	defer session.Close()
 
 	var stdoutBuf bytes.Buffer
@@ -287,7 +304,10 @@ func (p *Project) secureCopy(conn *ssh.Client, phase, filepath string) {
 	go func() {
 		w, _ := session.StdinPipe()
 		defer w.Close()
-		content := fileUtil.ReadFile(filepath)
+		content, err := fileUtil.ReadFile(filepath)
+		if err != nil {
+			log.Fatalf("Failed to read file on %s: %e", filepath, err)
+		}
 		fmt.Fprintln(w, "C0644", len(content), file)
 		fmt.Fprint(w, content)
 		fmt.Fprint(w, "\x00")
@@ -308,16 +328,24 @@ func (p *Project) makeDirOnLocal() {
 	fmt.Println("Creating directory...")
 
 	// Get the user home directory path.
-	homeDir := fileUtil.FindUserHomeDir()
+	homeDir, err := fileUtil.FindUserHomeDir()
+	if err != nil {
+		log.Fatalf("Failed to find user home directory: %e", err)
+	}
 
 	// The dir we want to create.
 	dir := homeDir + sep + "sites" + sep + p.projectname.name + ".dev"
 
 	// Check if the directory already exists.
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
+
 		err := os.Mkdir(dir, 0755)
-		errorUtil.CheckError("Failed to create directory.", err)
+		if err != nil {
+			log.Fatal("Failed to create directory: ", err)
+		}
+
 		fmt.Println(dir + " successfully created.")
+
 	} else {
 		fmt.Println(dir + " already exist.\nRemoving old and creating new...")
 
@@ -325,6 +353,7 @@ func (p *Project) makeDirOnLocal() {
 		if err := os.RemoveAll(dir); err != nil {
 			log.Fatalf("Error removing %s\n%s", dir, err)
 		}
+
 		p.makeDirOnLocal()
 	}
 }
@@ -332,39 +361,22 @@ func (p *Project) makeDirOnLocal() {
 // Git clone on local machine
 func (p *Project) gitOnLocal() {
 
-	homeDir := fileUtil.FindUserHomeDir()
+	homeDir, err := fileUtil.FindUserHomeDir()
+	if err != nil {
+		log.Fatal("Failed to find user home directory: ", err)
+	}
 
 	if err := os.Chdir(homeDir + sep + "sites" + sep + p.projectname.name + ".dev" + sep); err != nil {
 		log.Fatal("Failed to change directory.")
 	} else {
 		repo := "ssh://" + p.projectname.name + "@" + p.host.name + "/home/" + p.projectname.name + "/private/repos/" + p.projectname.name + "_hub.git"
-
 		fmt.Println("Cloning repository...")
-
-		cmd := exec.Command("git", "clone", repo, ".")
-
-		// Stdout buffer
-		cmdOutput := &bytes.Buffer{}
-		// Attach buffer to command
-		cmd.Stdout = cmdOutput
-
-		var waitStatus syscall.WaitStatus
-
-		if err := cmd.Run(); err != nil {
-			log.Println("Failed to execute git clone: ", err)
-
-			// Did the command fail because of an unsuccessful exit code
-			if exitError, ok := err.(*exec.ExitError); ok {
-				waitStatus = exitError.Sys().(syscall.WaitStatus)
-				printLocalCmdOutput([]byte(fmt.Sprintf("%d", waitStatus.ExitStatus())))
-			}
-		}
 
 		wg := new(sync.WaitGroup)
 		wg.Add(3)
 
+		exeCmd("git clone "+repo+" .", wg)
 		exeCmd("git remote rename origin hub", wg)
-
 	}
 }
 
@@ -378,17 +390,23 @@ func mode() string {
 
 	var input, mode string
 
-	fmt.Print("[1] Add new project\n[2] Add user to an existing project\n")
+	fmt.Print("[1] Add new project\n[2] Add user to an existing project\nSelect mode: ")
 
 	_, err := fmt.Scanln(&input)
-	errorUtil.CheckError("Failed to read user input: ", err)
+	if err != nil {
+		log.Fatal("Failed to read user input: ", err)
+	}
 
 	if input == "1" {
 
 		var confirmation string
+
 		fmt.Print("Be aware that setting a new project will overwrite all previous environment configuration.\nDo you want to continue? [Y] [N]: ")
+
 		_, err := fmt.Scanln(&confirmation)
-		errorUtil.CheckError("Failed to read user input222: ", err)
+		if err != nil {
+			log.Fatal("Failed to read user input: ", err)
+		}
 
 		if confirmation == strings.ToLower("y") || confirmation == strings.ToLower("yes") {
 			mode = "new project"
@@ -410,7 +428,12 @@ func (p *Project) insertSshkey() {
 
 	fmt.Println("Copying public key...")
 
-	keyFile, err := os.Open(fileUtil.FindUserHomeDir() + sep + ".ssh" + sep + p.sshkey.name + ".pub")
+	homeDir, err := fileUtil.FindUserHomeDir()
+	if err != nil {
+		log.Fatalf("Failed to find user home directory: %e", err)
+	}
+
+	keyFile, err := os.Open(homeDir + sep + ".ssh" + sep + p.sshkey.name + ".pub")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -426,7 +449,7 @@ func (p *Project) insertSshkey() {
 }
 
 func exeCmd(cmd string, wg *sync.WaitGroup) {
-	fmt.Println("command is ", cmd)
+
 	// splitting head => g++ parts => rest of the command
 	parts := strings.Fields(cmd)
 	head := parts[0]
@@ -437,5 +460,6 @@ func exeCmd(cmd string, wg *sync.WaitGroup) {
 		fmt.Printf("%s", err)
 	}
 	fmt.Printf("%s", out)
+
 	wg.Done() // Need to signal to waitgroup that this goroutine is done
 }
